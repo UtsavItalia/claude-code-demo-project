@@ -30,27 +30,31 @@ npx vitest run src/path/to/file.test.ts
 - **Right bottom**: File tree + Monaco editor (`src/components/editor/`)
 
 ### AI generation pipeline (`src/app/api/chat/route.ts`)
-- Uses Vercel AI SDK `streamText()` with Claude (falls back to `MockLanguageModel` if no `ANTHROPIC_API_KEY`)
-- Claude has two tools: `str_replace_editor` (create/edit files) and `file_manager` (delete/rename)
-- System prompt lives in `src/lib/prompts/generation.tsx`
-- Max 120s timeout, 40 agentic steps
+- Uses Vercel AI SDK `streamText()` with `claude-haiku-4-5` (falls back to `MockLanguageModel` if no `ANTHROPIC_API_KEY`)
+- Claude has two tools defined in `src/lib/tools/`: `str_replace_editor` (view/create/str_replace/insert) and `file_manager` (delete/rename)
+- System prompt lives in `src/lib/prompts/generation.tsx` — instructs Claude to use `/App.jsx` as entrypoint, Tailwind CSS only, realistic placeholder data, responsive + accessible output
+- Max 120s timeout, 40 agentic steps (4 for mock)
+- On finish, saves messages + VFS to DB if `projectId` provided and user is authenticated
 
 ### Virtual file system (`src/lib/file-system.ts`)
 - In-memory only — no disk writes
 - State managed via `FileSystemContext` (`src/lib/contexts/file-system-context.tsx`)
-- Tool calls from Claude are intercepted and applied to the VFS
+- Tool calls from Claude are intercepted in `ChatContext` via `onToolCall`, dispatched to `FileSystemContext.handleToolCall()`
 - Serialized as JSON and stored in the `Project.data` DB column for authenticated users
+- Anonymous users: session state tracked via `src/lib/anon-work-tracker.ts` using `sessionStorage` with key prefix `uigen_`
 
 ### JSX live preview (`src/lib/transform/jsx-transformer.ts`)
-- Converts VFS files to executable browser code
-- Uses `@babel/standalone` in the iframe for JSX parsing
-- Generates import maps so components can import each other
+- Converts VFS files to blob URLs using `@babel/standalone` (auto-detects JS vs TS by filename)
+- Generates import maps for inter-component imports and third-party packages via `esm.sh`
+- Resolves `@/` alias, strips CSS imports, injects collected styles
+- `PreviewFrame.tsx` auto-detects entrypoint via fallback sequence: `/App.jsx` → `/App.tsx` → `/index.jsx` → `/index.tsx` → `/src/App.*`
+- Preview iframe includes Tailwind CSS via CDN; sandbox allows scripts, same-origin, forms
 
 ### Auth & persistence
 - JWT sessions via `jose`, passwords hashed with `bcrypt`, stored in HTTP-only cookies (7-day expiry)
-- `src/lib/auth.ts` + `src/middleware.ts` protect `/api/projects` and `/api/filesystem`
-- Anonymous users: state lives in memory only
-- Authenticated users: `Project` model persists `messages` (JSON) and `data` (VFS JSON) to SQLite via Prisma
+- Server actions in `src/actions/index.ts`: `signUp`, `signIn`, `signOut`, `getUser`, `createProject`, `getProject`, `getProjects`
+- `src/middleware.ts` protects auth-required routes; auth components live in `src/components/auth/`
+- Authenticated users are redirected from `/` to `/{projectId}` automatically
 
 ### Key contexts
 - `FileSystemContext` — VFS state, selected file, tool-call handling
@@ -62,7 +66,7 @@ Use comments sparingly. Only comment complex code.
 
 ## Environment
 
-Set `ANTHROPIC_API_KEY` in `.env` to enable real AI generation. Without it, mock responses are returned (static example components).
+Set `ANTHROPIC_API_KEY` in `.env` to enable real AI generation. Without it, mock responses stream pre-built example components (Counter, ContactForm, Card) with simulated delay.
 
 ## Database
 
